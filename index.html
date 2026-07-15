@@ -1,0 +1,734 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nexus Flow - Visual Logic Builder</title>
+    <!-- Tailwind CSS for rapid UI styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        canvas: '#1e1e24',
+                        panel: '#2b2b36',
+                        accent: '#6366f1', // Indigo
+                        wire: '#94a3b8'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- Phosphor Icons -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+    
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            overflow: hidden; /* Prevent scrolling, it's a full-screen app */
+            user-select: none; /* Prevent text selection while dragging */
+        }
+
+        /* Canvas Grid Background */
+        .bg-grid {
+            background-size: 40px 40px;
+            background-image: 
+                linear-gradient(to right, rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+        }
+
+        /* Node Styling */
+        .node {
+            position: absolute;
+            width: 240px;
+            background: #2b2b36;
+            border-radius: 0.75rem;
+            border: 1px solid #3f3f46;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5), 0 4px 6px -2px rgba(0, 0, 0, 0.3);
+            cursor: grab;
+            transition: border-color 0.2s, box-shadow 0.2s;
+            z-index: 10;
+        }
+        
+        .node:active { cursor: grabbing; z-index: 20; }
+        .node.selected {
+            border-color: #6366f1;
+            box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.3), 0 10px 15px -3px rgba(0, 0, 0, 0.5);
+            z-index: 15;
+        }
+
+        /* Connection Ports (The little circles) */
+        .port {
+            width: 14px;
+            height: 14px;
+            background: #3f3f46;
+            border: 2px solid #a1a1aa;
+            border-radius: 50%;
+            position: absolute;
+            cursor: crosshair;
+            transition: all 0.2s;
+            z-index: 30;
+        }
+        .port:hover { background: #6366f1; border-color: white; transform: scale(1.2); }
+        .port.connected { background: #10b981; border-color: #047857; }
+
+        /* Positioning ports on the node */
+        .port-in { left: -7px; top: 50%; transform: translateY(-50%); }
+        .port-out { right: -7px; top: 50%; transform: translateY(-50%); }
+
+        /* SVG Wiring */
+        .svg-canvas {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none; /* Let clicks pass through to nodes */
+            z-index: 5;
+        }
+        .wire-path {
+            fill: none;
+            stroke: #64748b;
+            stroke-width: 3;
+            stroke-linecap: round;
+            pointer-events: visibleStroke; /* Make wires clickable */
+            cursor: pointer;
+            transition: stroke 0.2s, stroke-width 0.2s;
+        }
+        .wire-path:hover { stroke: #ef4444; stroke-width: 5; } /* Hover to delete */
+        
+        /* Simulation Animation */
+        @keyframes flowPulse {
+            0% { stroke-dashoffset: 20; }
+            100% { stroke-dashoffset: 0; }
+        }
+        .wire-path.active {
+            stroke: #10b981; /* Green */
+            stroke-dasharray: 10;
+            animation: flowPulse 0.5s linear infinite;
+        }
+        
+        /* Hide UI on small screens */
+        @media (max-width: 768px) {
+            .mobile-warning { display: flex; }
+        }
+    </style>
+</head>
+<body class="bg-canvas text-gray-200 h-screen w-screen flex overflow-hidden">
+
+    <!-- Mobile Warning -->
+    <div class="mobile-warning hidden fixed inset-0 bg-canvas z-50 flex-col items-center justify-center p-6 text-center">
+        <i class="ph ph-desktop text-6xl text-accent mb-4"></i>
+        <h2 class="text-2xl font-bold mb-2">Desktop Recommended</h2>
+        <p class="text-gray-400">Nexus Flow is a complex visual builder designed for larger screens. Please view on a desktop or tablet for the best experience.</p>
+    </div>
+
+    <!-- Sidebar: Node Library -->
+    <aside class="w-64 bg-panel border-r border-gray-700 flex flex-col z-40">
+        <div class="p-4 border-b border-gray-700 flex items-center gap-3">
+            <div class="w-8 h-8 rounded bg-accent flex items-center justify-center">
+                <i class="ph ph-bezier-curve text-white text-xl"></i>
+            </div>
+            <h1 class="font-bold text-lg tracking-wide text-white">Nexus Flow</h1>
+        </div>
+        
+        <div class="p-4 flex-1 overflow-y-auto">
+            <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-4">Node Library</h3>
+            <div class="space-y-3">
+                <!-- Draggable Templates -->
+                <div class="library-item bg-gray-800 p-3 rounded border border-gray-700 cursor-grab hover:border-accent hover:bg-gray-750 transition-colors flex items-center gap-3" draggable="true" data-type="trigger">
+                    <i class="ph ph-lightning text-yellow-500 text-xl"></i>
+                    <div>
+                        <div class="text-sm font-medium">Event Trigger</div>
+                        <div class="text-xs text-gray-400">Starts the flow</div>
+                    </div>
+                </div>
+                
+                <div class="library-item bg-gray-800 p-3 rounded border border-gray-700 cursor-grab hover:border-accent transition-colors flex items-center gap-3" draggable="true" data-type="action">
+                    <i class="ph ph-gear text-blue-400 text-xl"></i>
+                    <div>
+                        <div class="text-sm font-medium">Process Data</div>
+                        <div class="text-xs text-gray-400">Transforms input</div>
+                    </div>
+                </div>
+
+                <div class="library-item bg-gray-800 p-3 rounded border border-gray-700 cursor-grab hover:border-accent transition-colors flex items-center gap-3" draggable="true" data-type="condition">
+                    <i class="ph ph-git-branch text-purple-400 text-xl"></i>
+                    <div>
+                        <div class="text-sm font-medium">Condition</div>
+                        <div class="text-xs text-gray-400">If/Else branching</div>
+                    </div>
+                </div>
+
+                <div class="library-item bg-gray-800 p-3 rounded border border-gray-700 cursor-grab hover:border-accent transition-colors flex items-center gap-3" draggable="true" data-type="output">
+                    <i class="ph ph-database text-green-400 text-xl"></i>
+                    <div>
+                        <div class="text-sm font-medium">Save Record</div>
+                        <div class="text-xs text-gray-400">Ends & stores flow</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="p-4 border-t border-gray-700 text-xs text-gray-500 text-center">
+            Drag items to canvas to build.
+        </div>
+    </aside>
+
+    <!-- Main Workspace -->
+    <main class="flex-1 relative flex flex-col">
+        <!-- Top Toolbar -->
+        <header class="h-14 bg-panel/80 backdrop-blur border-b border-gray-700 flex justify-between items-center px-6 z-40 absolute top-0 w-full">
+            <div class="flex items-center gap-4 text-sm">
+                <span id="node-count" class="text-gray-400">0 Nodes</span>
+                <span class="text-gray-600">|</span>
+                <span id="conn-count" class="text-gray-400">0 Connections</span>
+            </div>
+            <div class="flex gap-3">
+                <button id="btn-clear" class="px-4 py-1.5 rounded bg-gray-700 hover:bg-gray-600 text-sm font-medium transition-colors flex items-center gap-2">
+                    <i class="ph ph-trash"></i> Clear
+                </button>
+                <button id="btn-simulate" class="px-4 py-1.5 rounded bg-accent hover:bg-indigo-400 text-white text-sm font-medium transition-colors shadow-lg shadow-indigo-500/20 flex items-center gap-2">
+                    <i class="ph ph-play"></i> Simulate
+                </button>
+            </div>
+        </header>
+
+        <!-- Canvas Area -->
+        <div id="canvas-container" class="flex-1 relative bg-canvas bg-grid overflow-hidden">
+            <!-- SVG Layer for lines -->
+            <svg id="svg-layer" class="svg-canvas"></svg>
+            <!-- HTML Layer for nodes -->
+            <div id="node-layer" class="absolute inset-0 w-full h-full"></div>
+        </div>
+    </main>
+
+    <!-- Right Sidebar: Properties Panel -->
+    <aside id="properties-panel" class="w-72 bg-panel border-l border-gray-700 p-4 transform translate-x-full transition-transform duration-300 absolute right-0 top-0 h-full z-50">
+        <div class="flex justify-between items-center mb-6">
+            <h2 class="font-semibold text-white">Properties</h2>
+            <button id="close-props" class="text-gray-400 hover:text-white p-1">
+                <i class="ph ph-x"></i>
+            </button>
+        </div>
+        
+        <div id="props-content" class="space-y-4">
+            <!-- Dynamically populated -->
+            <div class="text-sm text-gray-400 text-center mt-10">Select a node to edit.</div>
+        </div>
+    </aside>
+
+
+    <script>
+        // --- State Management ---
+        const state = {
+            nodes: [],       // { id, type, x, y, title, data, element }
+            connections: [], // { id, fromNode, toNode, pathElement }
+            selectedNodeId: null,
+            draggedNode: null,
+            isDragging: false,
+            wiring: {
+                active: false,
+                sourceNode: null,
+                tempPath: null
+            },
+            offset: { x: 0, y: 0 } // For dragging inside the node
+        };
+
+        // --- DOM Elements ---
+        const canvasContainer = document.getElementById('canvas-container');
+        const nodeLayer = document.getElementById('node-layer');
+        const svgLayer = document.getElementById('svg-layer');
+        const libraryItems = document.querySelectorAll('.library-item');
+        
+        const propsPanel = document.getElementById('properties-panel');
+        const propsContent = document.getElementById('props-content');
+        const closePropsBtn = document.getElementById('close-props');
+        
+        const uiNodeCount = document.getElementById('node-count');
+        const uiConnCount = document.getElementById('conn-count');
+
+        // --- Utils ---
+        const generateId = () => 'node_' + Math.random().toString(36).substring(2, 9);
+        const getPortCenter = (nodeEl, type) => {
+            const port = nodeEl.querySelector(`.port-${type}`);
+            if (!port) return null;
+            const rect = port.getBoundingClientRect();
+            const canvasRect = canvasContainer.getBoundingClientRect();
+            return {
+                x: rect.left - canvasRect.left + rect.width / 2,
+                y: rect.top - canvasRect.top + rect.height / 2
+            };
+        };
+
+        // UI Updates
+        function updateStats() {
+            uiNodeCount.textContent = `${state.nodes.length} Node${state.nodes.length !== 1 ? 's' : ''}`;
+            uiConnCount.textContent = `${state.connections.length} Connection${state.connections.length !== 1 ? 's' : ''}`;
+        }
+
+        // --- Node Definitions ---
+        const nodeConfigs = {
+            'trigger': { title: 'Event Trigger', color: 'bg-yellow-500/10', border: 'border-yellow-500/50', icon: 'ph-lightning text-yellow-500', ports: ['out'] },
+            'action':  { title: 'Process Data', color: 'bg-blue-400/10', border: 'border-blue-400/50', icon: 'ph-gear text-blue-400', ports: ['in', 'out'] },
+            'condition':{ title: 'Condition', color: 'bg-purple-400/10', border: 'border-purple-400/50', icon: 'ph-git-branch text-purple-400', ports: ['in', 'out'] },
+            'output':  { title: 'Save Record', color: 'bg-green-400/10', border: 'border-green-400/50', icon: 'ph-database text-green-400', ports: ['in'] }
+        };
+
+        function createNode(type, x, y) {
+            const id = generateId();
+            const config = nodeConfigs[type];
+            
+            // Create DOM element
+            const el = document.createElement('div');
+            el.className = `node flex flex-col ${config.color} border ${config.border}`;
+            el.id = id;
+            el.style.left = `${x}px`;
+            el.style.top = `${y}px`;
+            
+            // HTML Structure of a Node
+            let portsHtml = '';
+            if (config.ports.includes('in'))  portsHtml += `<div class="port port-in" data-node="${id}" data-type="in" title="Input"></div>`;
+            if (config.ports.includes('out')) portsHtml += `<div class="port port-out" data-node="${id}" data-type="out" title="Output"></div>`;
+
+            el.innerHTML = `
+                <div class="px-4 py-3 border-b border-gray-700/50 flex items-center justify-between pointer-events-none">
+                    <div class="flex items-center gap-2">
+                        <i class="ph ${config.icon}"></i>
+                        <span class="font-medium text-sm text-gray-100 node-title">${config.title}</span>
+                    </div>
+                </div>
+                <div class="p-4 text-xs text-gray-400 min-h-[60px] flex items-center pointer-events-none desc-text">
+                    ID: ${id.split('_')[1].toUpperCase()}
+                </div>
+                ${portsHtml}
+            `;
+
+            // Node Object
+            const nodeData = { 
+                id, type, x, y, element: el, 
+                title: config.title, 
+                desc: 'Configure properties...',
+                config: config 
+            };
+            
+            state.nodes.push(nodeData);
+            nodeLayer.appendChild(el);
+            updateStats();
+
+            // Setup Events for this node
+            setupNodeEvents(nodeData);
+            return nodeData;
+        }
+
+        
+        // Native Drag from Library
+        libraryItems.forEach(item => {
+            item.addEventListener('dragstart', (e) => {
+                e.dataTransfer.setData('nodeType', item.dataset.type);
+                e.dataTransfer.effectAllowed = 'copy';
+            });
+        });
+
+        canvasContainer.addEventListener('dragover', (e) => {
+            e.preventDefault(); // Allow drop
+            e.dataTransfer.dropEffect = 'copy';
+        });
+
+        canvasContainer.addEventListener('drop', (e) => {
+            e.preventDefault();
+            const type = e.dataTransfer.getData('nodeType');
+            if (type) {
+                // Get drop coordinates relative to canvas
+                const rect = canvasContainer.getBoundingClientRect();
+                const x = e.clientX - rect.left - 120; // 120 is half node width
+                const y = e.clientY - rect.top - 50;  // 50 is half node height
+                
+                // Keep within bounds roughly
+                const safeX = Math.max(20, x);
+                const safeY = Math.max(70, y); // account for header
+                
+                createNode(type, safeX, safeY);
+            }
+        });
+
+        // Custom dragging for nodes inside canvas
+        function setupNodeEvents(node) {
+            const el = node.element;
+            
+            el.addEventListener('mousedown', (e) => {
+                // Ignore if clicking a port
+                if (e.target.classList.contains('port')) return;
+
+                selectNode(node);
+                
+                state.isDragging = true;
+                state.draggedNode = node;
+                
+                const rect = el.getBoundingClientRect();
+                state.offset.x = e.clientX - rect.left;
+                state.offset.y = e.clientY - rect.top;
+            });
+            
+            // Port Interaction (Wiring)
+            const outPort = el.querySelector('.port-out');
+            if (outPort) {
+                outPort.addEventListener('mousedown', (e) => {
+                    e.stopPropagation(); // Don't drag node
+                    startWiring(node);
+                });
+            }
+
+            const inPort = el.querySelector('.port-in');
+            if(inPort) {
+                inPort.addEventListener('mouseup', (e) => {
+                    e.stopPropagation();
+                    if(state.wiring.active && state.wiring.sourceNode.id !== node.id) {
+                        completeWiring(node);
+                    }
+                });
+            }
+        }
+
+        // Global Mouse Events for Canvas Dragging & Wiring
+        document.addEventListener('mousemove', (e) => {
+            const rect = canvasContainer.getBoundingClientRect();
+            
+            // 1. Dragging a node
+            if (state.isDragging && state.draggedNode) {
+                let x = e.clientX - rect.left - state.offset.x;
+                let y = e.clientY - rect.top - state.offset.y;
+                
+                // Basic boundary check
+                x = Math.max(0, Math.min(x, rect.width - 240));
+                y = Math.max(60, Math.min(y, rect.height - 100));
+
+                state.draggedNode.x = x;
+                state.draggedNode.y = y;
+                state.draggedNode.element.style.left = `${x}px`;
+                state.draggedNode.element.style.top = `${y}px`;
+                
+                updateConnections(); // Redraw lines
+            }
+
+            // 2. Drawing a wire
+            if (state.wiring.active && state.wiring.tempPath) {
+                const start = getPortCenter(state.wiring.sourceNode.element, 'out');
+                if(start) {
+                    const endX = e.clientX - rect.left;
+                    const endY = e.clientY - rect.top;
+                    state.wiring.tempPath.setAttribute('d', getBezierPath(start.x, start.y, endX, endY));
+                }
+            }
+        });
+
+        document.addEventListener('mouseup', () => {
+            // Stop node drag
+            if (state.isDragging) {
+                state.isDragging = false;
+                state.draggedNode = null;
+            }
+            
+            // Cancel wiring if dropped on empty space
+            if (state.wiring.active) {
+                if(state.wiring.tempPath) {
+                    state.wiring.tempPath.remove();
+                }
+                state.wiring.active = false;
+                state.wiring.sourceNode = null;
+                state.wiring.tempPath = null;
+            }
+        });
+
+
+        function getBezierPath(startX, startY, endX, endY) {
+            // Calculate bezier control points for a smooth 'S' curve
+            const curveStiffness = 0.5; // Defines how far out the curve extends horizontally
+            const deltaX = Math.abs(endX - startX);
+            const cpOffset = Math.max(100, deltaX * curveStiffness); // Minimum 100px curve
+
+            const cp1X = startX + cpOffset;
+            const cp1Y = startY;
+            const cp2X = endX - cpOffset;
+            const cp2Y = endY;
+            
+            return `M ${startX} ${startY} C ${cp1X} ${cp1Y}, ${cp2X} ${cp2Y}, ${endX} ${endY}`;
+        }
+
+        function startWiring(node) {
+            state.wiring.active = true;
+            state.wiring.sourceNode = node;
+            
+            // Create temporary SVG path
+            const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            path.classList.add('wire-path');
+            path.style.strokeDasharray = "5,5"; // Make temp line dashed
+            svgLayer.appendChild(path);
+            state.wiring.tempPath = path;
+        }
+
+        function completeWiring(targetNode) {
+            const sourceNode = state.wiring.sourceNode;
+            
+            // Check if connection already exists
+            const exists = state.connections.find(c => c.fromNode === sourceNode.id && c.toNode === targetNode.id);
+            if(exists) return;
+
+            // Create permanent path
+            const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            path.classList.add('wire-path');
+            path.dataset.from = sourceNode.id;
+            path.dataset.to = targetNode.id;
+            svgLayer.appendChild(path);
+
+            // Add click-to-delete event on the line itself
+            path.addEventListener('click', (e) => {
+                e.stopPropagation();
+                deleteConnection(sourceNode.id, targetNode.id);
+            });
+
+            const connId = `conn_${Math.random().toString(36).substr(2, 5)}`;
+            state.connections.push({ id: connId, fromNode: sourceNode.id, toNode: targetNode.id, pathElement: path });
+            
+            // Visual feedback on ports
+            sourceNode.element.querySelector('.port-out').classList.add('connected');
+            targetNode.element.querySelector('.port-in').classList.add('connected');
+
+            updateConnections();
+            updateStats();
+        }
+
+        function updateConnections() {
+            state.connections.forEach(conn => {
+                const source = state.nodes.find(n => n.id === conn.fromNode);
+                const target = state.nodes.find(n => n.id === conn.toNode);
+                
+                if (source && target) {
+                    const start = getPortCenter(source.element, 'out');
+                    const end = getPortCenter(target.element, 'in');
+                    if(start && end) {
+                        conn.pathElement.setAttribute('d', getBezierPath(start.x, start.y, end.x, end.y));
+                    }
+                }
+            });
+        }
+
+        function deleteConnection(fromId, toId) {
+            const index = state.connections.findIndex(c => c.fromNode === fromId && c.toNode === toId);
+            if(index > -1) {
+                const conn = state.connections[index];
+                conn.pathElement.remove();
+                state.connections.splice(index, 1);
+                
+                // Clean up port styles if no longer connected
+                const fromNode = state.nodes.find(n=>n.id === fromId);
+                const toNode = state.nodes.find(n=>n.id === toId);
+                
+                if(fromNode && !state.connections.some(c => c.fromNode === fromId)) {
+                    fromNode.element.querySelector('.port-out').classList.remove('connected');
+                }
+                if(toNode && !state.connections.some(c => c.toNode === toId)) {
+                    toNode.element.querySelector('.port-in').classList.remove('connected');
+                }
+                updateStats();
+            }
+        }
+
+        function selectNode(node) {
+            // Deselect previous
+            if (state.selectedNodeId) {
+                const prev = state.nodes.find(n => n.id === state.selectedNodeId);
+                if(prev) prev.element.classList.remove('selected');
+            }
+            
+            node.element.classList.add('selected');
+            state.selectedNodeId = node.id;
+            
+            // Update Properties Panel
+            propsPanel.classList.remove('translate-x-full'); // Slide in
+            
+            // Build dynamic form based on node type
+            let specificFields = '';
+            if(node.type === 'trigger') {
+                specificFields = `
+                    <div class="space-y-1">
+                        <label class="text-xs text-gray-400">Schedule</label>
+                        <select class="w-full bg-gray-800 border border-gray-600 rounded p-2 text-sm text-white outline-none focus:border-accent">
+                            <option>Manual Trigger</option>
+                            <option>Every Hour</option>
+                            <option>Daily at 8AM</option>
+                        </select>
+                    </div>`;
+            } else if (node.type === 'action') {
+                specificFields = `
+                    <div class="space-y-1">
+                        <label class="text-xs text-gray-400">API Endpoint</label>
+                        <input type="text" value="https://api.example.com/data" class="w-full bg-gray-800 border border-gray-600 rounded p-2 text-sm text-white outline-none focus:border-accent">
+                    </div>`;
+            }
+
+            propsContent.innerHTML = `
+                <div class="flex items-center gap-3 mb-6 p-3 bg-gray-800 rounded border border-gray-700">
+                    <i class="ph ${node.config.icon} text-2xl"></i>
+                    <div>
+                        <div class="font-medium text-white">${node.title}</div>
+                        <div class="text-xs text-gray-400">${node.id}</div>
+                    </div>
+                </div>
+
+                <div class="space-y-4">
+                    <div class="space-y-1">
+                        <label class="text-xs text-gray-400">Node Label</label>
+                        <input type="text" id="prop-label" value="${node.title}" class="w-full bg-gray-800 border border-gray-600 rounded p-2 text-sm text-white outline-none focus:border-accent transition-colors">
+                    </div>
+                    
+                    <div class="space-y-1">
+                        <label class="text-xs text-gray-400">Description</label>
+                        <textarea id="prop-desc" rows="2" class="w-full bg-gray-800 border border-gray-600 rounded p-2 text-sm text-white outline-none focus:border-accent resize-none">${node.desc}</textarea>
+                    </div>
+
+                    ${specificFields}
+
+                    <div class="pt-4 mt-4 border-t border-gray-700">
+                        <button id="btn-delete-node" class="w-full px-4 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-500 border border-red-500/30 rounded text-sm font-medium transition-colors flex justify-center items-center gap-2">
+                            <i class="ph ph-trash"></i> Delete Node
+                        </button>
+                    </div>
+                </div>
+            `;
+
+            // Bind update events
+            document.getElementById('prop-label').addEventListener('input', (e) => {
+                node.title = e.target.value;
+                node.element.querySelector('.node-title').textContent = node.title;
+            });
+            
+            document.getElementById('prop-desc').addEventListener('input', (e) => {
+                node.desc = e.target.value;
+                node.element.querySelector('.desc-text').textContent = node.desc;
+            });
+
+            document.getElementById('btn-delete-node').addEventListener('click', () => {
+                deleteNode(node.id);
+                propsPanel.classList.add('translate-x-full'); // Close panel
+            });
+        }
+
+        closePropsBtn.addEventListener('click', () => {
+            propsPanel.classList.add('translate-x-full');
+            if(state.selectedNodeId) {
+                const n = state.nodes.find(n => n.id === state.selectedNodeId);
+                if(n) n.element.classList.remove('selected');
+                state.selectedNodeId = null;
+            }
+        });
+
+        // Background click to deselect
+        canvasContainer.addEventListener('mousedown', (e) => {
+            if(e.target === canvasContainer || e.target.tagName === 'svg') {
+                if(state.selectedNodeId) {
+                    const n = state.nodes.find(n => n.id === state.selectedNodeId);
+                    if(n) n.element.classList.remove('selected');
+                    state.selectedNodeId = null;
+                    propsPanel.classList.add('translate-x-full');
+                }
+            }
+        });
+
+        function deleteNode(id) {
+            // Remove connections associated with this node
+            const connsToRemove = state.connections.filter(c => c.fromNode === id || c.toNode === id);
+            connsToRemove.forEach(c => deleteConnection(c.fromNode, c.toNode));
+
+            // Remove Node
+            const index = state.nodes.findIndex(n => n.id === id);
+            if (index > -1) {
+                state.nodes[index].element.remove();
+                state.nodes.splice(index, 1);
+            }
+            updateStats();
+        }
+
+
+        // Clear All Button
+        document.getElementById('btn-clear').addEventListener('click', () => {
+            // Quick confirmation replacing custom modal logic for brevity in single file
+            const confirmed = window.confirm ? window.confirm("Clear entire canvas?") : true; 
+            if(confirmed) {
+                state.nodes.forEach(n => n.element.remove());
+                state.connections.forEach(c => c.pathElement.remove());
+                state.nodes = [];
+                state.connections = [];
+                propsPanel.classList.add('translate-x-full');
+                updateStats();
+            }
+        });
+
+        // Simulate Flow (Visual Effect)
+        document.getElementById('btn-simulate').addEventListener('click', () => {
+            if(state.connections.length === 0) {
+                // Flash canvas red briefly if nothing to simulate
+                canvasContainer.style.backgroundColor = '#451a1f';
+                setTimeout(() => canvasContainer.style.backgroundColor = '', 300);
+                return;
+            }
+            
+            const btn = document.getElementById('btn-simulate');
+            btn.innerHTML = `<i class="ph ph-spinner-gap animate-spin"></i> Running...`;
+            btn.classList.add('opacity-80', 'pointer-events-none');
+
+            // Find trigger nodes (nodes with no incoming connections)
+            const triggers = state.nodes.filter(n => n.type === 'trigger');
+            
+            // Add animation class to all lines sequentially or all at once for demo
+            state.connections.forEach(c => {
+                c.pathElement.classList.add('active');
+            });
+
+            // Stop simulation after 2 seconds
+            setTimeout(() => {
+                state.connections.forEach(c => {
+                    c.pathElement.classList.remove('active');
+                });
+                btn.innerHTML = `<i class="ph ph-play"></i> Simulate`;
+                btn.classList.remove('opacity-80', 'pointer-events-none');
+            }, 2500);
+        });
+
+        // Add some initial nodes on load for demonstration
+        window.addEventListener('load', () => {
+            const ww = window.innerWidth;
+            const wh = window.innerHeight;
+            
+            // Only auto-populate if screen is large enough
+            if (ww > 768) {
+                const trigger = createNode('trigger', ww/2 - 400, wh/2 - 150);
+                const action1 = createNode('action', ww/2 - 50, wh/2 - 200);
+                const condition = createNode('condition', ww/2 - 50, wh/2);
+                const output = createNode('output', ww/2 + 300, wh/2 - 100);
+
+                // We have to wait a tiny bit for the DOM to render before getting port positions for initial wiring
+                setTimeout(() => {
+                    // Manually setup some connections programmatically
+                    state.wiring.sourceNode = trigger;
+                    completeWiring(action1);
+                    
+                    state.wiring.sourceNode = trigger;
+                    completeWiring(condition);
+
+                    state.wiring.sourceNode = action1;
+                    completeWiring(output);
+                    
+                    state.wiring.active = false;
+                    state.wiring.sourceNode = null;
+                }, 100);
+            }
+        });
+
+    </script>
+</body>
+</html>
