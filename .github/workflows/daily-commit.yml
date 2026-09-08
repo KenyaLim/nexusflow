@@ -2,7 +2,6 @@ name: Daily Commit
 
 on:
   schedule:
-    # Runs at 00:00 UTC every day
     - cron: '0 0 * * *'
   workflow_dispatch:
 
@@ -14,10 +13,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
       
-      - name: Set up Git
+      - name: Set up Git with your identity
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "KenyaLim"
+          git config user.email "KenyaLim@users.noreply.github.com"
       
       - name: Create/Update daily log
         run: |
